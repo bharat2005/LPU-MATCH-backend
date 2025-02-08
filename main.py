@@ -6,7 +6,6 @@ from flask_marshmallow import Marshmallow
 app = Flask(__name__)
 CORS(app)
 
-
 app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///app.db"
 app.config["JWT_SECRET_KEY"] = "supersecret"  
 
