@@ -135,11 +135,48 @@ def profile():
     db.session.commit()
     return jsonify({"message": "Profile created successfully"})
 
+
+
+
+
+
+
+
 @app.route("/dashboard", methods=["GET"])
 def dashboard():
     profiles = User.query.all()
     random.shuffle(profiles)
     return jsonify(user_schema.dump(profiles))
+
+
+
+
+@app.route("/filtered_dashboard", methods=["POST"])
+def filtered_dashboard():
+     
+     data = request.get_json()
+     age_min, age_max = data['ageRange']  
+     gender = data['gender']  
+     reason = data['reason']  
+
+     filtered_profiles = User.query.filter(
+        User.age >= age_min,
+        User.age <= age_max,
+        User.gender == gender,
+        User.reason == reason
+     ).all()
+
+
+     print(filtered_profiles)
+
+     return jsonify(user_schema.dump(filtered_profiles))
+
+
+
+
+
+
+
 
 
 
@@ -303,8 +340,9 @@ def handle_message(data):
         ((Message.sender_id == data['sender_id']) & (Message.receiver_id == data['receiver_id'])) |
         ((Message.sender_id == data['receiver_id']) & (Message.receiver_id == data['sender_id']))
     ).order_by(Message.timestamp).all()
-
-    socketio.emit("bharat", message_schema.dump(messages), room=data['room'])
+    messages = message_schema.dump(messages)
+    print(messages)
+    socketio.emit("bharat", messages, room=data['room'])
 
 
 
