@@ -1,5 +1,9 @@
-from app import app, db 
+from app import app, db , Swipe
 
 with app.app_context():
-    db.metadata.tables['match'].drop(db.engine)  
+    Swipe.__table__.drop(db.engine)
+
+
+
+
 

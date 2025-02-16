@@ -12,7 +12,7 @@ app = Flask(__name__)
 CORS(app)
 socketio = SocketIO(app, cors_allowed_origins="*")
 
-app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///appc.db"
+app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///appco.db"
 db = SQLAlchemy(app)
 ma = Marshmallow(app)
 
@@ -96,6 +96,22 @@ message_schema = MessageSchema(many=True)
 single_message_schema = MessageSchema()
 
 
+class Notifications(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    sender_id = db.Column(db.Integer)
+    receiver_id = db.Column(db.Integer)
+    type = db.Column(db.String())
+    is_seen = db.Column(db.String())
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
+
+class NotificationsSchema(ma.SQLAlchemyAutoSchema):
+    class Meta:
+        model = Notifications
+        load_instance = True
+
+notifications_schema = NotificationsSchema(many=True)
+single_notifications_schema = NotificationsSchema()
+
 
 
 
@@ -142,11 +158,19 @@ def profile():
 
 
 
-@app.route("/dashboard", methods=["GET"])
+@app.route("/dashboard", methods=["POST"])
 def dashboard():
+    data = request.get_json()
     profiles = User.query.all()
     random.shuffle(profiles)
-    return jsonify(user_schema.dump(profiles))
+
+    
+    likes_users = Swipe.query.filter((Swipe.target_user_id == data['user_id']) & (Swipe.swipe_action=="right")).all()
+    if likes_users:
+        bool = 'yes'
+    else:
+        bool = 'no'
+    return jsonify({'cards':user_schema.dump(profiles),'bool':bool})
 
 
 
@@ -185,15 +209,18 @@ def filtered_dashboard():
 @app.route("/swipeadd", methods=["POST"])
 def swipeadd():
     data = request.get_json()
-    swipe = Swipe(
-        user_id=data['user_id'],
-        target_user_id= data['target_user_id'],
-        swipe_action=data['swipe_action'],
-    )
-    db.session.add(swipe)
-    db.session.commit()
+    if data['swipe_action'] == 'right':
+        swipe = Swipe(
+            user_id=data['user_id'],
+            target_user_id= data['target_user_id'],
+            swipe_action=data['swipe_action'],
+        )
+        db.session.add(swipe)
+        db.session.commit()
 
     return jsonify({'message':'Added to Database'})
+
+
 
 
 @app.route('/likes', methods=['POST'])
@@ -208,7 +235,12 @@ def likes():
     likes_users_ids = [a.user_id for a in likes_users]
     likes_users_data = user_schema.dump(User.query.filter(User.user_id.in_(likes_users_ids)))
 
-    return jsonify({'likedByYou':liked_users_data,'likesYou':likes_users_data})
+    if likes_users:
+        bool = 'yes'
+    else:
+        bool = 'no'
+
+    return jsonify({'likedByYou':liked_users_data,'likesYou':likes_users_data, 'bool':bool})
 
 
 
@@ -261,9 +293,6 @@ def match():
     likes_users = Swipe.query.filter((Swipe.target_user_id == data['user_id']) & (Swipe.swipe_action=="right")).all()
     likes_users_ids = [a.user_id for a in likes_users]
     likes_users_data = user_schema.dump(User.query.filter(User.user_id.in_(likes_users_ids)))
-
-
-
     return jsonify({'likesYou':likes_users_data})
 
 
@@ -282,31 +311,44 @@ def matches():
             match_users_ids.append(a.user_1_id)
 
     match_users_data = user_schema.dump(User.query.filter(User.user_id.in_(match_users_ids)))
-    return jsonify({'matches':match_users_data})
+
+
+    notifications = Notifications.query.filter((Notifications.receiver_id == data['user_id'])&(Notifications.type == 'message')).all()   
+    notifications = notifications_schema.dump(notifications)
+
+    return jsonify({'matches':match_users_data, 'notifications':notifications})
 
 
 
-
-@app.route("/send", methods=["POST"])
-def send():
+@app.route('/seen',methods=["POST"])
+def seen():
     data = request.get_json()
-    sender_id = data["sender_id"]
-    receiver_id = data["receiver_id"]
-    content = data["content"]
+    notifications = Notifications.query.filter((Notifications.sender_id == data['sender_id']) & (Notifications.receiver_id == data['user_id'])).all()
+    for a in notifications:
+        db.session.delete(a)
+    db.session.commit()
+    return jsonify({'message':'Notifications deleted successfully'})
+   
 
-    new_message = Message(
-        sender_id=sender_id,
-        receiver_id=receiver_id,
-        content=content
-    )
-    db.session.add(new_message)  #
-    db.session.commit()  
+
+
+# @app.route("/send", methods=["POST"])
+# def send():
+#     data = request.get_json()
+#     sender_id = data["sender_id"]
+#     receiver_id = data["receiver_id"]
+#     content = data["content"]
+
+#     new_message = Message(
+#         sender_id=sender_id,
+#         receiver_id=receiver_id,
+#         content=content
+#     )
+#     db.session.add(new_message)  
+#     db.session.commit()  
 
     
-    return jsonify({"message": "Message sent successfully!"})
-
-
-
+#     return jsonify({"message": "Message sent successfully!"})
 
 
 
@@ -327,21 +369,43 @@ def join_room_event(data):
 
 @socketio.on("bharat")
 def handle_message(data):
+
+
     if 'message' in data:
         text = Message(
             sender_id=data['sender_id'],
-            receiver_id=data['receiver_id'],  
+            receiver_id=data['receiver_id'],
             content=data['message']
         )
         db.session.add(text)
         db.session.commit()
+
+
+
+        if 'type' in data:
+            notification = Notifications(
+                sender_id = data['sender_id'],
+                receiver_id = data['receiver_id'],
+                type = data['type'],
+                is_seen = data['is_seen'],
+            )
+            db.session.add(notification)
+            db.session.commit()
+
+
+
+
+
 
     messages = Message.query.filter(
         ((Message.sender_id == data['sender_id']) & (Message.receiver_id == data['receiver_id'])) |
         ((Message.sender_id == data['receiver_id']) & (Message.receiver_id == data['sender_id']))
     ).order_by(Message.timestamp).all()
     messages = message_schema.dump(messages)
-    print(messages)
+
+
+
+
     socketio.emit("bharat", messages, room=data['room'])
 
 
