@@ -12,7 +12,7 @@ app = Flask(__name__)
 CORS(app)
 socketio = SocketIO(app, cors_allowed_origins="*")
 
-app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///appco.db"
+app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///apppie.db"
 db = SQLAlchemy(app)
 ma = Marshmallow(app)
 
@@ -161,16 +161,18 @@ def profile():
 @app.route("/dashboard", methods=["POST"])
 def dashboard():
     data = request.get_json()
-    profiles = User.query.all()
+    selfprofile = User.query.filter_by(user_id = data['user_id']).first()
+    profiles = User.query.filter(User.user_id != data['user_id'] ).all()
     random.shuffle(profiles)
 
-    
-    likes_users = Swipe.query.filter((Swipe.target_user_id == data['user_id']) & (Swipe.swipe_action=="right")).all()
-    if likes_users:
-        bool = 'yes'
-    else:
-        bool = 'no'
-    return jsonify({'cards':user_schema.dump(profiles),'bool':bool})
+    likesNoti = Notifications.query.filter((Notifications.receiver_id == data['user_id'])&(Notifications.type == 'like')).all()
+    print(likesNoti)
+    matchesNoti = Notifications.query.filter((Notifications.receiver_id == data['user_id'])&(Notifications.type == 'match')).all()
+    print(matchesNoti)
+    return jsonify({'cards': user_schema.dump(profiles),
+                    'selfprofile': single_user_schema.dump(selfprofile), 
+                    'likesNoti': notifications_schema.dump(likesNoti),
+                    'matchesNoti': notifications_schema.dump(matchesNoti)})
 
 
 
@@ -184,10 +186,11 @@ def filtered_dashboard():
      reason = data['reason']  
 
      filtered_profiles = User.query.filter(
-        User.age >= age_min,
-        User.age <= age_max,
-        User.gender == gender,
-        User.reason == reason
+        (User.age >= age_min)&
+        (User.age <= age_max)&
+        (User.gender == gender)&
+        (User.reason == reason)&
+        (User.user_id != data['user_id'] )
      ).all()
 
 
@@ -196,10 +199,39 @@ def filtered_dashboard():
      return jsonify(user_schema.dump(filtered_profiles))
 
 
+@app.route('/notidel',methods=["PATCH"])
+def notidel():
+    data = request.get_json()
+
+    if 'target_user_id' in data:
+        noti = Notifications.query.filter((Notifications.receiver_id == data['user_id'])&(Notifications.sender_id == data['target_user_id'])&(Notifications.type == 'like')).first()
+        if noti:
+            db.session.delete(noti)
+            db.session.commit()
+
+        likesNoti = Notifications.query.filter((Notifications.receiver_id == data['user_id'])&(Notifications.type == 'like')).all()
+
+        return jsonify({'likesNoti':notifications_schema.dump(likesNoti)})
+    
+    elif 'sender_id' in data:
+        noti = Notifications.query.filter((Notifications.receiver_id == data['user_id'])&(Notifications.sender_id == data['sender_id'])&(Notifications.type == 'match')).first()
+        if noti:
+            db.session.delete(noti)
+            db.session.commit()
+
+        MatchesNoti = Notifications.query.filter((Notifications.receiver_id == data['user_id'])&(Notifications.type == 'like')).all()
+
+        return jsonify({'MatchesNoti':notifications_schema.dump(MatchesNoti)})
 
 
 
-
+@app.route('/delaccount', methods = ["POST"])
+def delaccount():
+    data = request.get_json()
+    user = User.query.filter_by(user_id = data['user_id']).first()
+    db.session.delete(user)
+    db.session.commit()
+    return jsonify({'message':'Account Deleted Successfully!'})
 
 
 
@@ -216,6 +248,15 @@ def swipeadd():
             swipe_action=data['swipe_action'],
         )
         db.session.add(swipe)
+        db.session.commit()
+    
+        notification = Notifications(
+            sender_id = data['user_id'],
+            receiver_id = data['target_user_id'],
+            type = 'like',
+            is_seen = 'unseen',
+        )
+        db.session.add(notification)
         db.session.commit()
 
     return jsonify({'message':'Added to Database'})
@@ -235,12 +276,7 @@ def likes():
     likes_users_ids = [a.user_id for a in likes_users]
     likes_users_data = user_schema.dump(User.query.filter(User.user_id.in_(likes_users_ids)))
 
-    if likes_users:
-        bool = 'yes'
-    else:
-        bool = 'no'
-
-    return jsonify({'likedByYou':liked_users_data,'likesYou':likes_users_data, 'bool':bool})
+    return jsonify({'likedByYou':liked_users_data,'likesYou':likes_users_data})
 
 
 
@@ -293,6 +329,16 @@ def match():
     likes_users = Swipe.query.filter((Swipe.target_user_id == data['user_id']) & (Swipe.swipe_action=="right")).all()
     likes_users_ids = [a.user_id for a in likes_users]
     likes_users_data = user_schema.dump(User.query.filter(User.user_id.in_(likes_users_ids)))
+
+    notification = Notifications(
+        sender_id = data['user_id'],
+        receiver_id = data['target_user_id'],
+        type = 'match',
+        is_seen = 'unseen'
+    )
+    db.session.add(notification)
+    db.session.commit()
+
     return jsonify({'likesYou':likes_users_data})
 
 
@@ -332,29 +378,6 @@ def seen():
 
 
 
-# @app.route("/send", methods=["POST"])
-# def send():
-#     data = request.get_json()
-#     sender_id = data["sender_id"]
-#     receiver_id = data["receiver_id"]
-#     content = data["content"]
-
-#     new_message = Message(
-#         sender_id=sender_id,
-#         receiver_id=receiver_id,
-#         content=content
-#     )
-#     db.session.add(new_message)  
-#     db.session.commit()  
-
-    
-#     return jsonify({"message": "Message sent successfully!"})
-
-
-
-
-
-
 @socketio.on("join_room")
 def join_room_event(data):
     match = Match.query.filter(
@@ -370,7 +393,6 @@ def join_room_event(data):
 @socketio.on("bharat")
 def handle_message(data):
 
-
     if 'message' in data:
         text = Message(
             sender_id=data['sender_id'],
@@ -379,8 +401,6 @@ def handle_message(data):
         )
         db.session.add(text)
         db.session.commit()
-
-
 
         if 'type' in data:
             notification = Notifications(
@@ -391,11 +411,6 @@ def handle_message(data):
             )
             db.session.add(notification)
             db.session.commit()
-
-
-
-
-
 
     messages = Message.query.filter(
         ((Message.sender_id == data['sender_id']) & (Message.receiver_id == data['receiver_id'])) |
