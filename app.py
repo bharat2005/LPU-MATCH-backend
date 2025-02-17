@@ -12,7 +12,7 @@ app = Flask(__name__)
 CORS(app)
 socketio = SocketIO(app, cors_allowed_origins="*")
 
-app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///apppie.db"
+app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///appcute.db"
 db = SQLAlchemy(app)
 ma = Marshmallow(app)
 
@@ -166,9 +166,7 @@ def dashboard():
     random.shuffle(profiles)
 
     likesNoti = Notifications.query.filter((Notifications.receiver_id == data['user_id'])&(Notifications.type == 'like')).all()
-    print(likesNoti)
     matchesNoti = Notifications.query.filter((Notifications.receiver_id == data['user_id'])&(Notifications.type == 'match')).all()
-    print(matchesNoti)
     return jsonify({'cards': user_schema.dump(profiles),
                     'selfprofile': single_user_schema.dump(selfprofile), 
                     'likesNoti': notifications_schema.dump(likesNoti),
@@ -192,9 +190,6 @@ def filtered_dashboard():
         (User.reason == reason)&
         (User.user_id != data['user_id'] )
      ).all()
-
-
-     print(filtered_profiles)
 
      return jsonify(user_schema.dump(filtered_profiles))
 
@@ -418,28 +413,7 @@ def handle_message(data):
     ).order_by(Message.timestamp).all()
     messages = message_schema.dump(messages)
 
-
-
-
     socketio.emit("bharat", messages, room=data['room'])
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
